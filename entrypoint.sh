@@ -212,5 +212,6 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw in {"1", "true", "yes", "on"}
 PY
 
-export PYTHONPATH="/tmp:/home/agent/src:$PYTHONPATH"
-exec uv run python /home/agent/src/server.py --host 0.0.0.0 --port 9009 --card-url http://127.0.0.1:9009
+cd /tmp
+export PYTHONPATH="/tmp:/home/agent/src"
+exec /home/agent/.venv/bin/python -m server --host 0.0.0.0 --port 9009 --card-url http://127.0.0.1:9009
