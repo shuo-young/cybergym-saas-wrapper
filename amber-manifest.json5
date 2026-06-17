@@ -1,74 +1,115 @@
 {
-  manifest_version: "0.3.0",
-  experimental_features: ["docker"],
-
-  config_schema: {
-    type: "object",
-    properties: {
-      saas_url: {
-        type: "string",
-        secret: true,
-        description: "Base URL for the private SaaS solver. Provide through Quick Submit secrets, not git.",
+  "manifest_version": "0.3.0",
+  "experimental_features": [
+    "docker"
+  ],
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "saas_url": {
+        "type": "string",
+        "secret": true,
+        "description": "Base URL for the private SaaS solver. Provide through Quick Submit secrets, not git."
       },
-      saas_api_key: {
-        type: "string",
-        secret: true,
-        description: "Optional bearer token for the SaaS solver.",
+      "saas_api_key": {
+        "type": "string",
+        "secret": true,
+        "description": "Optional bearer token for the SaaS solver."
       },
-      timeout_seconds: {
-        type: "string",
-        description: "Request timeout for the SaaS solve call.",
+      "timeout_seconds": {
+        "type": "string",
+        "description": "Request timeout for the SaaS solve call."
       },
-      health_url: {
-        type: "string",
-        description: "Optional full health URL or path relative to saas_url. Defaults to /health.",
+      "health_url": {
+        "type": "string",
+        "description": "Optional full health URL or path relative to saas_url. Defaults to /health."
       },
-      solve_url: {
-        type: "string",
-        description: "Optional full solve URL or path relative to saas_url. Defaults to /solve.",
+      "solve_url": {
+        "type": "string",
+        "description": "Optional full solve URL or path relative to saas_url. Defaults to /solve."
       },
-      skip_health_check: {
-        type: "string",
-        description: "If 'true', skip GET health_url before POST solve_url.",
+      "skip_health_check": {
+        "type": "string",
+        "description": "If 'true', skip GET health_url before POST solve_url."
       },
-      test_before_submit: {
-        type: "string",
-        description: "If 'true', ask the green agent to run test_vulnerable before final artifact submission.",
-      },
+      "test_before_submit": {
+        "type": "string",
+        "description": "If 'true', ask the green agent to run test_vulnerable before final artifact submission."
+      }
     },
-    required: ["saas_url"],
-    additionalProperties: false,
+    "required": [
+      "saas_url"
+    ],
+    "additionalProperties": false
   },
-
-  slots: {
-    saas: { kind: "http", optional: true },
-    proxy: { kind: "a2a", optional: true },
-  },
-
-  program: {
-    image: "ghcr.io/rdi-foundation/cybergym-dummy-purple@sha256:acfb5bf862eb5e980eec67ad83d6da9477f1811c843c2bed73ef6e00864b1831",
-    entrypoint: ["sh", "-ceu", { file: "./entrypoint.sh" }],
-    env: {
-      PYTHONUNBUFFERED: "1",
-      SAAS_URL: { when: "config.saas_url", value: "${config.saas_url}" },
-      SAAS_SLOT_URL: { when: "slots.saas", value: "${slots.saas.url}" },
-      SAAS_API_KEY: { when: "config.saas_api_key", value: "${config.saas_api_key}" },
-      SAAS_TIMEOUT_SECONDS: { when: "config.timeout_seconds", value: "${config.timeout_seconds}" },
-      SAAS_HEALTH_URL: { when: "config.health_url", value: "${config.health_url}" },
-      SAAS_SOLVE_URL: { when: "config.solve_url", value: "${config.solve_url}" },
-      SAAS_SKIP_HEALTH_CHECK: { when: "config.skip_health_check", value: "${config.skip_health_check}" },
-      TEST_BEFORE_SUBMIT: { when: "config.test_before_submit", value: "${config.test_before_submit}" },
+  "slots": {
+    "saas": {
+      "kind": "http",
+      "optional": true
     },
-    network: {
-      endpoints: [
-        { name: "a2a_endpoint", port: 9009 },
-      ],
+    "proxy": {
+      "kind": "a2a",
+      "optional": true
+    }
+  },
+  "program": {
+    "image": "ghcr.io/rdi-foundation/cybergym-dummy-purple@sha256:acfb5bf862eb5e980eec67ad83d6da9477f1811c843c2bed73ef6e00864b1831",
+    "entrypoint": [
+      "sh",
+      "-ceu",
+      "cat >/tmp/agent.py <<'PY'\nimport asyncio\nimport base64\nimport json\nimport os\nfrom typing import Any\nfrom uuid import uuid4\n\nimport httpx\nfrom a2a.server.tasks import TaskUpdater\nfrom a2a.types import DataPart, FilePart, FileWithBytes, Message, Part, TaskState\nfrom a2a.utils import get_message_text, new_agent_text_message\n\n\nclass Agent:\n    def __init__(self):\n        self._waiting_for_test_result: asyncio.Queue[dict[str, Any]] = asyncio.Queue()\n\n    async def run(self, message: Message, updater: TaskUpdater) -> None:\n        test_result = _get_data_part(message)\n        if test_result is not None and self._is_test_result(test_result):\n            await self._waiting_for_test_result.put(test_result)\n            return\n\n        prompt = get_message_text(message)\n        task_files = _extract_file_parts(message)\n        if not task_files:\n            await updater.reject(new_agent_text_message(\"no challenge files received\"))\n            return\n\n        saas_url = (os.getenv(\"SAAS_SLOT_URL\") or os.getenv(\"SAAS_URL\") or \"\").rstrip(\"/\")\n        if not saas_url:\n            await updater.failed(new_agent_text_message(\"SaaS URL is not configured\"))\n            return\n\n        timeout_seconds = _env_int(\"SAAS_TIMEOUT_SECONDS\", 1800)\n        file_summary = \", \".join(f\"{name}:{len(data)}\" for name, data, _ in task_files)\n        await updater.update_status(\n            TaskState.working,\n            new_agent_text_message(f\"Forwarding task to SaaS solver ({file_summary})\"),\n        )\n\n        try:\n            poc_bytes = await _call_saas_solver(\n                base_url=saas_url,\n                api_key=os.getenv(\"SAAS_API_KEY\"),\n                health_url=os.getenv(\"SAAS_HEALTH_URL\"),\n                solve_url=os.getenv(\"SAAS_SOLVE_URL\"),\n                skip_health_check=_env_bool(\"SAAS_SKIP_HEALTH_CHECK\", False),\n                prompt=prompt,\n                files=task_files,\n                timeout_seconds=timeout_seconds,\n                context_id=message.context_id or \"\",\n            )\n        except Exception as exc:\n            await updater.failed(new_agent_text_message(f\"SaaS solve failed: {_safe_error(exc)}\"))\n            return\n\n        if _env_bool(\"TEST_BEFORE_SUBMIT\", False):\n            await updater.update_status(\n                TaskState.working,\n                new_agent_text_message(\"Requesting vulnerable-version PoC test from green agent\"),\n            )\n            await updater.requires_input(\n                updater.new_agent_message(\n                    parts=[\n                        Part(root=DataPart(data={\"action\": \"test_vulnerable\"})),\n                        _poc_part(poc_bytes),\n                    ]\n                )\n            )\n            try:\n                result = await asyncio.wait_for(\n                    self._waiting_for_test_result.get(), timeout=timeout_seconds\n                )\n                await updater.update_status(\n                    TaskState.working,\n                    new_agent_text_message(\n                        f\"Green test returned: exit_code={result.get('exit_code')} \"\n                        f\"error={result.get('error')}\"\n                    ),\n                )\n            except asyncio.TimeoutError:\n                await updater.update_status(\n                    TaskState.working,\n                    new_agent_text_message(\"Timed out waiting for green test result; submitting anyway\"),\n                )\n\n        await updater.add_artifact(parts=[_poc_part(poc_bytes)], name=\"poc\")\n\n    @staticmethod\n    def _is_test_result(data: dict[str, Any]) -> bool:\n        return \"exit_code\" in data or \"output\" in data or \"error\" in data\n\n\ndef _extract_file_parts(message: Message) -> list[tuple[str, bytes, str]]:\n    files: list[tuple[str, bytes, str]] = []\n    for part in message.parts:\n        if isinstance(part.root, FilePart) and isinstance(part.root.file, FileWithBytes):\n            file_obj = part.root.file\n            name = file_obj.name or f\"file-{len(files)}\"\n            mime_type = file_obj.mime_type or \"application/octet-stream\"\n            files.append((name, base64.b64decode(file_obj.bytes), mime_type))\n    return files\n\n\ndef _get_data_part(message: Message) -> dict[str, Any] | None:\n    for part in message.parts:\n        if isinstance(part.root, DataPart):\n            return part.root.data\n    return None\n\n\ndef _poc_part(poc_bytes: bytes) -> Part:\n    return Part(\n        root=FilePart(\n            file=FileWithBytes(\n                bytes=base64.b64encode(poc_bytes).decode(\"ascii\"),\n                name=\"poc\",\n                mime_type=\"application/octet-stream\",\n            )\n        )\n    )\n\n\nasync def _call_saas_solver(\n    *,\n    base_url: str,\n    api_key: str | None,\n    health_url: str | None,\n    solve_url: str | None,\n    skip_health_check: bool,\n    prompt: str,\n    files: list[tuple[str, bytes, str]],\n    timeout_seconds: int,\n    context_id: str,\n) -> bytes:\n    headers = {\"X-Request-ID\": context_id or uuid4().hex}\n    if api_key:\n        headers[\"Authorization\"] = f\"Bearer {api_key}\"\n\n    timeout = httpx.Timeout(timeout_seconds)\n    async with httpx.AsyncClient(timeout=timeout) as client:\n        resolved_health_url = _resolve_url(base_url, health_url or \"/health\")\n        if not skip_health_check:\n            try:\n                health = await client.get(resolved_health_url, headers=headers)\n                health.raise_for_status()\n            except httpx.HTTPStatusError as exc:\n                raise RuntimeError(f\"health check failed: HTTP {exc.response.status_code}\") from exc\n            except httpx.RequestError as exc:\n                raise RuntimeError(f\"health check failed: {exc.__class__.__name__}\") from exc\n\n        multipart_files = [(\"files\", (name, data, mime_type)) for name, data, mime_type in files]\n        metadata = {\n            \"prompt\": prompt,\n            \"files\": [{\"name\": name, \"size\": len(data), \"mime_type\": mime} for name, data, mime in files],\n            \"context_id\": context_id,\n        }\n        resolved_solve_url = _resolve_url(base_url, solve_url or \"/solve\")\n        response = await client.post(\n            resolved_solve_url,\n            headers=headers,\n            data={\"metadata\": json.dumps(metadata)},\n            files=multipart_files,\n        )\n        try:\n            response.raise_for_status()\n        except httpx.HTTPStatusError as exc:\n            raise RuntimeError(f\"solve request failed: HTTP {exc.response.status_code}\") from exc\n\n    content_type = response.headers.get(\"content-type\", \"\")\n    if content_type.startswith(\"application/octet-stream\"):\n        return response.content\n\n    payload = response.json()\n    if \"poc_base64\" in payload:\n        return base64.b64decode(payload[\"poc_base64\"])\n    if \"poc_hex\" in payload:\n        return bytes.fromhex(payload[\"poc_hex\"])\n    if \"poc_text\" in payload:\n        return payload[\"poc_text\"].encode()\n    raise RuntimeError(\"SaaS response must include poc_base64, poc_hex, poc_text, or octet-stream body\")\n\n\ndef _safe_error(exc: Exception) -> str:\n    if isinstance(exc, RuntimeError):\n        return str(exc)\n    return exc.__class__.__name__\n\n\ndef _resolve_url(base_url: str, path_or_url: str) -> str:\n    if path_or_url.startswith((\"http://\", \"https://\")):\n        return path_or_url\n    return f\"{base_url.rstrip('/')}/{path_or_url.lstrip('/')}\"\n\n\ndef _env_int(name: str, default: int) -> int:\n    raw = os.getenv(name, \"\").strip()\n    if not raw:\n        return default\n    try:\n        return int(raw)\n    except ValueError:\n        return default\n\n\ndef _env_bool(name: str, default: bool) -> bool:\n    raw = os.getenv(name, \"\").strip().lower()\n    if not raw:\n        return default\n    return raw in {\"1\", \"true\", \"yes\", \"on\"}\nPY\n\ncd /tmp\nexport PYTHONPATH=\"/tmp:/home/agent/src\"\nexec /home/agent/.venv/bin/python -m server --host 0.0.0.0 --port 9009 --card-url http://127.0.0.1:9009\n"
+    ],
+    "env": {
+      "PYTHONUNBUFFERED": "1",
+      "SAAS_URL": {
+        "when": "config.saas_url",
+        "value": "${config.saas_url}"
+      },
+      "SAAS_SLOT_URL": {
+        "when": "slots.saas",
+        "value": "${slots.saas.url}"
+      },
+      "SAAS_API_KEY": {
+        "when": "config.saas_api_key",
+        "value": "${config.saas_api_key}"
+      },
+      "SAAS_TIMEOUT_SECONDS": {
+        "when": "config.timeout_seconds",
+        "value": "${config.timeout_seconds}"
+      },
+      "SAAS_HEALTH_URL": {
+        "when": "config.health_url",
+        "value": "${config.health_url}"
+      },
+      "SAAS_SOLVE_URL": {
+        "when": "config.solve_url",
+        "value": "${config.solve_url}"
+      },
+      "SAAS_SKIP_HEALTH_CHECK": {
+        "when": "config.skip_health_check",
+        "value": "${config.skip_health_check}"
+      },
+      "TEST_BEFORE_SUBMIT": {
+        "when": "config.test_before_submit",
+        "value": "${config.test_before_submit}"
+      }
     },
+    "network": {
+      "endpoints": [
+        {
+          "name": "a2a_endpoint",
+          "port": 9009
+        }
+      ]
+    }
   },
-
-  provides: {
-    a2a: { kind: "a2a", endpoint: "a2a_endpoint" },
+  "provides": {
+    "a2a": {
+      "kind": "a2a",
+      "endpoint": "a2a_endpoint"
+    }
   },
-
-  exports: { a2a: "a2a" },
+  "exports": {
+    "a2a": "a2a"
+  }
 }
