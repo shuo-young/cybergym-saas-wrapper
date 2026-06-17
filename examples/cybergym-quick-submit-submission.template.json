@@ -33,7 +33,7 @@
       "config": {}
     },
     "agent": {
-      "manifest": "https://raw.githubusercontent.com/shuo-young/cybergym-saas-wrapper/main/amber-manifest.json5",
+      "manifest": "https://raw.githubusercontent.com/shuo-young/cybergym-saas-wrapper/8888d402d90bb28989a7ca0f62de0f72e014e6d4/amber-manifest.json5",
       "config": {
         "saas_url": "${config.agent_saas_url}",
         "timeout_seconds": "1800",
