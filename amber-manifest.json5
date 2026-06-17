@@ -36,11 +36,12 @@
         description: "If 'true', ask the green agent to run test_vulnerable before final artifact submission.",
       },
     },
-    required: ["saas_url"],
+    required: [],
     additionalProperties: false,
   },
 
   slots: {
+    saas: { kind: "http", optional: true },
     proxy: { kind: "a2a", optional: true },
   },
 
@@ -49,7 +50,8 @@
     entrypoint: ["sh", "-ceu", { file: "./entrypoint.sh" }],
     env: {
       PYTHONUNBUFFERED: "1",
-      SAAS_URL: "${config.saas_url}",
+      SAAS_URL: { when: "config.saas_url", value: "${config.saas_url}" },
+      SAAS_SLOT_URL: { when: "slots.saas", value: "${slots.saas.url}" },
       SAAS_API_KEY: { when: "config.saas_api_key", value: "${config.saas_api_key}" },
       SAAS_TIMEOUT_SECONDS: { when: "config.timeout_seconds", value: "${config.timeout_seconds}" },
       SAAS_HEALTH_URL: { when: "config.health_url", value: "${config.health_url}" },

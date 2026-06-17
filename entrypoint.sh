@@ -28,7 +28,7 @@ class Agent:
             await updater.reject(new_agent_text_message("no challenge files received"))
             return
 
-        saas_url = (os.getenv("SAAS_URL") or "").rstrip("/")
+        saas_url = (os.getenv("SAAS_URL") or os.getenv("SAAS_SLOT_URL") or "").rstrip("/")
         if not saas_url:
             await updater.failed(new_agent_text_message("SaaS URL is not configured"))
             return
