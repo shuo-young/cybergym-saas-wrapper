@@ -19,6 +19,7 @@
         "assessment_config": {
           "tasks": ["arvo:10400"],
           "level": "level1",
+          "num_shards": 1,
           "num_workers": 1
         },
         "participant_roles": {

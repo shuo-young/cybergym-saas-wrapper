@@ -30,6 +30,7 @@ def build_submission(agent_id: str, task: str) -> dict:
                     "assessment_config": {
                         "tasks": [task],
                         "level": "level1",
+                        "num_shards": 1,
                         "num_workers": 1,
                     },
                     "participant_roles": {

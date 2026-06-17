@@ -35,6 +35,7 @@ For a first smoke test, use one task and one worker. The prepared example submis
 ```json
 "tasks": ["arvo:10400"],
 "level": "level1",
+"num_shards": 1,
 "num_workers": 1
 ```
 
