@@ -25,10 +25,10 @@ https://agentbeats.dev/agentbeater/cybergym/submit
 Register/select a purple agent whose Amber manifest URL is the wrapper manifest above. In the submit form, provide the participant secret:
 
 ```text
-saas_url = <private SaaS base URL>
+agent_saas_url = <private SaaS base URL>
 ```
 
-Do not put the private URL in the GitHub submission JSON. The Quick Submit backend stores it separately and the GitHub Action retrieves it as `AMBER_CONFIG_AGENT_SAAS_URL`.
+Do not put the private URL in the GitHub submission JSON. The Quick Submit backend stores it separately and the GitHub Action retrieves it as `AMBER_CONFIG_AGENT_SAAS_URL`, then Amber maps it to the wrapper's `saas_url` config.
 
 For a first smoke test, use one task and one worker. The prepared example submission uses:
 
