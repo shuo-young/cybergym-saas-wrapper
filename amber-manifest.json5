@@ -1,0 +1,72 @@
+{
+  manifest_version: "0.3.0",
+  experimental_features: ["docker"],
+
+  config_schema: {
+    type: "object",
+    properties: {
+      saas_url: {
+        type: "string",
+        secret: true,
+        description: "Base URL for the private SaaS solver. Provide through Quick Submit secrets, not git.",
+      },
+      saas_api_key: {
+        type: "string",
+        secret: true,
+        description: "Optional bearer token for the SaaS solver.",
+      },
+      timeout_seconds: {
+        type: "string",
+        description: "Request timeout for the SaaS solve call.",
+      },
+      health_url: {
+        type: "string",
+        description: "Optional full health URL or path relative to saas_url. Defaults to /health.",
+      },
+      solve_url: {
+        type: "string",
+        description: "Optional full solve URL or path relative to saas_url. Defaults to /solve.",
+      },
+      skip_health_check: {
+        type: "string",
+        description: "If 'true', skip GET health_url before POST solve_url.",
+      },
+      test_before_submit: {
+        type: "string",
+        description: "If 'true', ask the green agent to run test_vulnerable before final artifact submission.",
+      },
+    },
+    required: ["saas_url"],
+    additionalProperties: false,
+  },
+
+  slots: {
+    proxy: { kind: "a2a", optional: true },
+  },
+
+  program: {
+    image: "ghcr.io/rdi-foundation/cybergym-dummy-purple@sha256:acfb5bf862eb5e980eec67ad83d6da9477f1811c843c2bed73ef6e00864b1831",
+    entrypoint: ["sh", "-ceu", { file: "./entrypoint.sh" }],
+    env: {
+      PYTHONUNBUFFERED: "1",
+      SAAS_URL: "${config.saas_url}",
+      SAAS_API_KEY: { when: "config.saas_api_key", value: "${config.saas_api_key}" },
+      SAAS_TIMEOUT_SECONDS: { when: "config.timeout_seconds", value: "${config.timeout_seconds}" },
+      SAAS_HEALTH_URL: { when: "config.health_url", value: "${config.health_url}" },
+      SAAS_SOLVE_URL: { when: "config.solve_url", value: "${config.solve_url}" },
+      SAAS_SKIP_HEALTH_CHECK: { when: "config.skip_health_check", value: "${config.skip_health_check}" },
+      TEST_BEFORE_SUBMIT: { when: "config.test_before_submit", value: "${config.test_before_submit}" },
+    },
+    network: {
+      endpoints: [
+        { name: "a2a_endpoint", port: 9009 },
+      ],
+    },
+  },
+
+  provides: {
+    a2a: { kind: "a2a", endpoint: "a2a_endpoint" },
+  },
+
+  exports: { a2a: "a2a" },
+}
